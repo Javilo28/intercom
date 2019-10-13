@@ -54,7 +54,7 @@ class Intercom_buffer(Intercom):
 
             *packet, chunks = struct.unpack('2048hh', message)
             # print(*packet)
-            time.sleep(1)
+            time.sleep(0.5)
             posWithModule = chunks % self.size_buffer
             lista[posWithModule] = packet
             #print(lista)
