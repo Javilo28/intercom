@@ -5,6 +5,7 @@ import argparse  # https://docs.python.org/3/library/argparse.html
 import socket  # https://docs.python.org/3/library/socket.html
 import queue  # https://docs.python.org/3/library/queue.html
 import struct
+import time
 
 if __debug__:
     import sys
@@ -47,11 +48,13 @@ class Intercom_buffer(Intercom):
             # DEL BUFER, ES DECIR, DE LA LISTA, DONDE SE VA A INSERTAR ESE MENSAJE
 
             # unpack
+
             message, source_address = receiving_sock.recvfrom(
                 Intercom.max_packet_size)
 
             *packet, chunks = struct.unpack('2048hh', message)
             # print(*packet)
+            time.sleep(1)
             posWithModule = chunks % self.size_buffer
             lista[posWithModule] = packet
             #print(lista)
@@ -72,6 +75,7 @@ class Intercom_buffer(Intercom):
             sending_sock.sendto(
                 message,
                 (self.destination_IP_addr, self.destination_port))
+
             # message = lista[self.number_of_chunks]
             # En primer lugar, creamos el array outdata, y lo igualamos a numpy.frombuffer, este metodo crea un
             # array pasandole un bufer, en este caso, el message, a ese array nuevo, le hacemos reshape para
