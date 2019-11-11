@@ -10,7 +10,7 @@ class Intercom_binaural(Intercom_bitplanes):
             self.record_send_and_play = self.record_send_and_play_stereo
 
     def record_send_and_play_stereo(self, indata, outdata, frames, time, status):
-        #cogemos los 2 canales de datos, y le restamos el canal 1
+        #extraemos el canal derecho al canal izquierdo
         indata[:,0] -= indata[:,1]                                                                  
         #ahora cogemos el unico canal sobrante, y cogemos cada plano de bits y lo vamos enviando(issue anterior igual)
         for bitplane_number in range(self.number_of_channels*16-1, -1, -1):
@@ -23,6 +23,7 @@ class Intercom_binaural(Intercom_bitplanes):
         self.recorded_chunk_number = (self.recorded_chunk_number + 1) % self.MAX_CHUNK_NUMBER
         chunk = self._buffer[self.played_chunk_number % self.cells_in_buffer]
         #una vez recibido el canal, le añadimos el otro canal para restaurar ambos y reproducirlos
+      
         chunk[:,0] += chunk[:,1]                                                                      
         self._buffer[self.played_chunk_number % self.cells_in_buffer] = self.generate_zero_chunk()
         self.played_chunk_number = (self.played_chunk_number + 1) % self.cells_in_buffer
