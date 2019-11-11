@@ -1,106 +1,60 @@
-from intercom import Intercom
-import sounddevice as sd  # https://python-sounddevice.readthedocs.io
-import numpy  # https://numpy.org/
-import argparse  # https://docs.python.org/3/library/argparse.html
-import socket  # https://docs.python.org/3/library/socket.html
-import queue  # https://docs.python.org/3/library/queue.html
+# Adding a buffer.
+
+import sounddevice as sd
+import numpy as np
 import struct
-import time
+from intercom import Intercom
 
 if __debug__:
     import sys
+
 class Intercom_buffer(Intercom):
-    size_buffer = 4
-    number_of_chunks = 0
+
+    MAX_CHUNK_NUMBER = 65536
 
     def init(self, args):
         Intercom.init(self, args)
+        self.chunks_to_buffer = args.chunks_to_buffer
+        self.cells_in_buffer = self.chunks_to_buffer * 2
+        self._buffer = [self.generate_zero_chunk()] * self.cells_in_buffer
+        self.packet_format = f"!H{self.samples_per_chunk}h"
+        if __debug__:
+            print(f"chunks_to_buffer={self.chunks_to_buffer}")
+
+    def receive_and_buffer(self):
+        message, source_address = self.receiving_sock.recvfrom(Intercom.MAX_MESSAGE_SIZE)
+        chunk_number, *chunk = struct.unpack(self.packet_format, message)
+        self._buffer[chunk_number % self.cells_in_buffer] = np.asarray(chunk).reshape(self.frames_per_chunk, self.number_of_channels)
+        return chunk_number
+
+    def send(self, indata):
+        message = struct.pack(self.packet_format, self.recorded_chunk_number, *(indata.flatten()))
+        self.sending_sock.sendto(message, (self.destination_IP_addr, self.destination_port))        
+
+    def record_send_and_play(self, indata, outdata, frames, time, status):
+        self.send(indata)
+        self.recorded_chunk_number = (self.recorded_chunk_number + 1) % self.MAX_CHUNK_NUMBER
+        chunk = self._buffer[self.played_chunk_number % self.cells_in_buffer]
+        self._buffer[self.played_chunk_number % self.cells_in_buffer] = self.generate_zero_chunk()
+        self.played_chunk_number = (self.played_chunk_number + 1) % self.cells_in_buffer
+        outdata[:] = chunk
+        if __debug__:
+            sys.stderr.write("."); sys.stderr.flush()
 
     def run(self):
-        # SOCK_DGRAM quiere decir que usaremos UDP ya que no necesitamos esperar respuesta de que ha recibido el
-        # mensaje el receptor. AF_INET quiere decir que usaremos ese tipo de comunicacion ya que es mas sencilla.
-        sending_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        receiving_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-        # Indicamos en que puertos vamos a escuchar, con 0.0.0.0 decimos que escucharemos en todos los puertos
-        # Y el puerto que estemos utilizando en cada momento, se lo asignamos a self.listening_port, que es
-        # nuestro puerto por el que escuchamos. En cada momento, escuchamos por 1 solo puerto (listening_port)
-        # Y hay que asignarselo a esa variable. Basicamente decimos que podemos escuchar por cualquier puerto.
-        listening_endpoint = ("0.0.0.0", self.listening_port)
-
-        # Asociamos el socket al host y puerto de la variable listening_endpoint.
-        receiving_sock.bind(listening_endpoint)
-        mychar = numpy.zeros(
-            (self.samples_per_chunk, self.number_of_channels),
-            self.dtype)
-        lista = [mychar] * self.size_buffer
-
-        def receive_and_buffer():
-            # El metodo recvfrom devuelve un par del tipo: string, direccion, donde string contiene los datos
-            # que el receiving_sock (el socket receptor) recibe, y direccion contiene la direccion del socket
-            # emisor, es decir, quien le ha enviado esos datos.
-            # Estos dos valores, los almacena en message y source_address respectivamente.
-            # Esto lo va a hacer con todo el paquete, es decir, hasta llegar al max packet size.
-            # Cada vez que ejecuta el metodo y obtiene un mensaje, lo mete en la cola.
-            # lista[modulo]=[message]
-
-            # OBTIENE EL MENSAJE QUE LE LLEGA, COGE SU CHUNK Y HACE MODULO TAMAÑO DE BUFER, EL RESULTADO ES LA POSICION
-            # DEL BUFER, ES DECIR, DE LA LISTA, DONDE SE VA A INSERTAR ESE MENSAJE
-
-            # unpack
-
-            message, source_address = receiving_sock.recvfrom(
-                Intercom.max_packet_size)
-
-            *packet, chunks = struct.unpack('2048hh', message)
-            # print(*packet)
-            time.sleep(0.5)
-            posWithModule = chunks % self.size_buffer
-            lista[posWithModule] = packet
-            #print(lista)
-
-        def record_send_and_play(indata, outdata, frames, time, status):
-            # Envia los datos de entrada a la direccion de destino y el puerto de destino
-
-            # if self.number_of_chunks==15:
-            # self.number_of_chunks=0
-            self.number_of_chunks = (self.number_of_chunks + 1) % self.size_buffer
-            data = numpy.frombuffer(
-                indata,
-                numpy.int16)
-            message = struct.pack('2048hh', *data, self.number_of_chunks)
-
-            # CAMBIAR
-            # pack struct
-            sending_sock.sendto(
-                message,
-                (self.destination_IP_addr, self.destination_port))
-
-            # message = lista[self.number_of_chunks]
-            # En primer lugar, creamos el array outdata, y lo igualamos a numpy.frombuffer, este metodo crea un
-            # array pasandole un bufer, en este caso, el message, a ese array nuevo, le hacemos reshape para
-            # cambiarle la forma en la que se muestre el array, diciendole el numero de filas y columnas que
-            # vienen dados por samples_per_chunk y number_of_channels respectivamente.
-            outdata[:] = numpy.frombuffer(
-                indata,
-                numpy.int16).reshape(
-                self.samples_per_chunk, self.number_of_channels)
-
-            # Escribimos puntos cada vez que detecte el sonido, con flush, obligamos a mostrar todos los datos
-            # del bufer
-            if __debug__:
-                sys.stderr.write(".");
-                sys.stderr.flush()
-
-        with sd.Stream(
-                samplerate=self.samples_per_second,
-                blocksize=self.samples_per_chunk,
-                dtype=self.dtype,
-                channels=self.number_of_channels,
-                callback=record_send_and_play):
-            print('-=- Press <CTRL> + <C> to quit -=-')
+        self.recorded_chunk_number = 0
+        self.played_chunk_number = 0
+        with sd.Stream(samplerate=self.frames_per_second, blocksize=self.frames_per_chunk, dtype=np.int16, channels=self.number_of_channels, callback=self.record_send_and_play):
+            print("-=- Press CTRL + c to quit -=-")
+            first_received_chunk_number = self.receive_and_buffer()
+            self.played_chunk_number = (first_received_chunk_number - self.chunks_to_buffer) % self.cells_in_buffer
             while True:
-                receive_and_buffer()
+                self.receive_and_buffer()
+
+    def add_args(self):
+        parser = Intercom.add_args(self)
+        parser.add_argument("-cb", "--chunks_to_buffer", help="Number of chunks to buffer", type=int, default=32)
+        return parser
 
 if __name__ == "__main__":
     intercom = Intercom_buffer()
