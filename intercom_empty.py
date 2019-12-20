@@ -44,7 +44,7 @@ class Intercom_empty(Intercom_DFC):
         if self.NOBPTS > self.max_NOBPTS:
             self.NOBPTS = self.max_NOBPTS
         self.aux=self.countlist[self.played_chunk_number%self.cells_in_buffer]
-        last_BPTS = self.max_NOBPTS - self.NOBPTS - 1 + self.aux
+        last_BPTS = self.max_NOBPTS - self.NOBPTS - 1 - self.aux
         print(last_BPTS)
         self.send_bitplane(indata, self.max_NOBPTS-1)
         self.send_bitplane(indata, self.max_NOBPTS-2)
